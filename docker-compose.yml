@@ -1,45 +1,18 @@
-version: '2'
-services:
-  influxdb:
-    image: influxdb:latest
-    ports:
-      - '8086:8086'
-    volumes:
-      - influxdb-storage:/var/lib/influxdb
-    environment:
-      - INFLUXDB_DB=db0
-      - INFLUXDB_ADMIN_USER=${INFLUXDB_USERNAME}
-      - INFLUXDB_ADMIN_PASSWORD=${INFLUXDB_PASSWORD}
-    networks:
-      - promnet   
+version: '3.1'
 
-  telegraf:
-    image: telegraf:1.18-alpine
+services:  
+  alertmanager:
+    image: prom/alertmanager
     volumes:
-    - ./telegraf/etc/telegraf.conf:/etc/telegraf/telegraf.conf:ro
-    depends_on:
-      - influxdb
-    links:
-      - influxdb
+      - ./config:/prometheus
+      - ./data/alertmanager:/data
+    command:
+      - '--config.file=/prometheus/alertmanager.yml'
+      - '--storage.path=/data'
     ports:
-    - '8125:8125/udp'
+      - ${ALERTMANAGER_PORT}:9093
     networks:
-      - promnet   
-
-  chronograf:
-    image: chronograf:latest
-    ports:
-      - '127.0.0.1:8888:8888'
-    volumes:
-      - chronograf-storage:/var/lib/chronograf
-    depends_on:
-      - influxdb
-    environment:
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_USERNAME=${INFLUXDB_USERNAME}
-      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD}
-    networks:
-      - promnet   
+      - promnet
 
   prometheus:
     image: prom/prometheus
@@ -50,55 +23,27 @@ services:
       - '--config.file=/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/data'
     ports:
-      - 9090:9090
+      - ${PROMETHEUS_PORT}:9090
     depends_on:
       - alertmanager
     restart: always
     networks:
-      - promnet   
+      - promnet
+      - dmz
 
-  grafana:
-    image: grafana/grafana:latest
+  node:
+    image: prom/node-exporter
     ports:
-      - '3000:3000'
-    volumes:
-      - grafana-storage:/var/lib/grafana
-      - ./grafana/provisioning/:/etc/grafana/provisioning
-      - ./grafana/dashboards/:/etc/grafana/dashboards
-    depends_on:
-      - influxdb
-      - prometheus
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USERNAME}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-    networks:
-      - promnet   
-
-  alertmanager:
-    image: prom/alertmanager
-    volumes:
-      - ./config:/prometheus
-      - ./data/alertmanager:/data
-    command:
-      - '--config.file=/prometheus/alertmanager.yml'
-      - '--storage.path=/data'
-    ports:
-      - 9093:9093
-    networks:
-      - promnet   
-
-  collectd:
-    image: prom/collectd-exporter
-    ports:
-      - 9103:9103
+      - ${NODE_EXPORTER_PORT}:9100
     restart: always
     networks:
       - promnet
+      - dmz
 
   cadvisor:
     image: google/cadvisor
     ports:
-      - 9880:8080
+      - ${CADVISOR_PORT}:8080
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw
@@ -107,12 +52,111 @@ services:
     networks:
       - promnet
 
+  collectd:
+    image: prom/collectd-exporter
+    ports:
+      - ${COLLECTCD_PORT}:9103
+    restart: always
+    networks:
+      - promnet
+  mongo:
+    image: mongo
+    volumes:
+      - ./data/mongodb:/data/db
+    restart: always     
+    networks:
+      - dbnet      
+
+  alerta:
+    image: alerta/alerta-web
+    ports:
+      - ${ALERTAWEB_PORT}:8080
+    depends_on:
+      - db
+    links:
+      - mongo
+    environment:
+      - DEBUG=1  # remove this line to turn DEBUG off
+      - DATABASE_URL=mongodb://mongo:27017/monitoring
+      # - AUTH_REQUIRED=True
+      - ADMIN_USERS=admin@alerta.io
+      - PLUGINS=remote_ip,reject,heartbeat,blackout,prometheus
+      - ALERTMANAGER_API_URL=http://alertmanager:9093
+    restart: always
+    networks:
+      - promnet
+      - dbnet
+
+  influxdb:
+    image: influxdb:latest
+    ports:
+      - ${INFLUXDB_PORT}:8086
+    volumes:
+      - influxdb-storage:/var/lib/influxdb
+    environment:
+      - INFLUXDB_DB=${INFLUXDB_DB}
+      - INFLUXDB_ADMIN_USER=${INFLUXDB_USERNAME}
+      - INFLUXDB_ADMIN_PASSWORD=${INFLUXDB_PASSWORD}
+    networks:
+      - dmz
+
+  telegraf:
+    image: telegraf:1.18-alpine
+    volumes:
+    - ./telegraf/etc/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    ports:
+    - ${TELEGRAF_PORT}:8125/udp
+    networks:
+      - dmz   
+
+  chronograf:
+    image: chronograf:latest
+    ports:
+      - ${CRONOGRAF_PORT}:8888
+    volumes:
+      - chronograf-storage:/var/lib/chronograf
+    depends_on:
+      - influxdb
+    environment:
+      - INFLUXDB_URL=${INFLUXDB_URL}:${INFLUXDB_PORT}
+      - INFLUXDB_USERNAME=${INFLUXDB_USERNAME}
+      - INFLUXDB_PASSWORD=${INFLUXDB_PASSWORD}
+    networks:
+      - dmz   
+
+
+  grafana:
+    build: 
+      context: ./grafana
+    ports:
+      - ${GRAFANA_PORT}:3000
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning
+      - ./grafana/dashboards/:/etc/grafana/dashboards
+    depends_on:
+      - influxdb
+      - prometheus
+      - node
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USERNAME}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}        
+    networks:
+      - dmz      
+      
 volumes:
   influxdb-storage:
   chronograf-storage:
   grafana-storage:
+
 networks:
   promnet:
     driver: bridge
   dbnet:
+    driver: bridge
+  dmz:
     driver: bridge
