@@ -8,20 +8,12 @@ datasources:
   is_default: true
   editable: false
 
-- name: 'default'
-  org_id: 1
-  folder: ''
-  type: 'file'
-  options:
-    folder: '/var/lib/grafana/dashboards'
-
-datasources:
-  - name: InfluxDB
-    type: influxdb
-    access: proxy
-    database: db0
-    user: admin
-    password: admin
-    url: http://influxdb:8086
-    isDefault: true
-    editable: true
+- name: InfluxDB
+  type: influxdb
+  access: proxy
+  database: db0
+  user: admin
+  password: admin
+  url: http://influxdb:8086
+  isDefault: true
+  editable: true
